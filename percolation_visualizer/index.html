@@ -1,0 +1,353 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <title>Percolation Visualizer</title>
+  <style>
+    body {
+      font-family: 'Segoe UI', sans-serif;
+      background-color: #f9fbfd;
+      color: #333;
+      margin: 0;
+      padding: 0;
+    }
+  
+    h2, h3 {
+      color: #1a73e8;
+    }
+  
+    canvas {
+      border: 2px solid #444;
+      display: block;
+      margin: 20px auto;
+      background-color: #ffffff;
+    }
+  
+    #motivation, #statsSection, #controls {
+      max-width: 800px;
+      margin: 40px auto;
+      padding: 20px;
+      background-color: #ffffff;
+      border-radius: 10px;
+      box-shadow: 0 2px 8px rgba(0, 0, 0, 0.1);
+    }
+  
+    #controls input, #statsSection input {
+      padding: 5px;
+      margin: 5px;
+      width: 60px;
+      font-size: 1em;
+      border: 1px solid #ccc;
+      border-radius: 4px;
+    }
+  
+    #controls button, #statsSection button {
+      padding: 8px 16px;
+      font-size: 1em;
+      background-color: #1a73e8;
+      color: white;
+      border: none;
+      border-radius: 5px;
+      margin-top: 10px;
+      cursor: pointer;
+    }
+  
+    #controls button:hover, #statsSection button:hover {
+      background-color: #1669c1;
+    }
+  
+    pre {
+      background-color: #f1f1f1;
+      padding: 10px;
+      text-align: left;
+      border-radius: 5px;
+      white-space: pre-wrap;
+    }
+  
+    ul {
+      text-align: left;
+      margin-left: 20px;
+    }
+  
+    hr {
+      margin: 60px auto;
+      max-width: 800px;
+      border: none;
+      border-top: 1px solid #ccc;
+    }
+  </style>
+</head>
+<body>
+    <div id="motivation" style="max-width: 800px; margin: 40px auto; padding: 10px 20px; font-family: sans-serif;">
+        <h2>Interactive Percolation Simulator & Estimator</h2>
+  <p>
+    This is an interactive tool that helps you visualize and understand the concept of <strong>percolation</strong>, as well as estimate the <strong>percolation threshold</strong> using simulation. You can manually click on a grid to observe how water (or current) might flow through a system, or run automated trials to calculate statistical estimates of when percolation is likely to happen.
+  </p>
+
+  <h3>What is the Percolation Problem?</h3>
+  <p>
+    Imagine a material made up of randomly distributed blocked and open cells. If water is poured from the top, will it be able to make its way down to the bottom? This question is modeled using an <strong>n-by-n grid</strong> where each square (called a "site") can either be <strong>blocked</strong> or <strong>open</strong>. We say the system <strong>percolates</strong> when there's a connected path of open sites from the top row to the bottom row.
+  </p>
+  <p>
+    Percolation models are used in many real-world situations, like predicting how fluids move through soil, how diseases spread through a population, or how current flows through a composite material. Understanding when percolation occurs helps scientists study the behavior of complex systems.
+  </p>
+
+  <h3>The Union-Find Data Structure</h3>
+  <p>
+    To keep track of which sites are connected, we use a data structure called <strong>Union-Find</strong> (also known as Disjoint Set Union). It efficiently groups together open sites that are next to each other and helps us quickly check whether two sites are part of the same connected component.
+  </p>
+  <p>
+    In this simulator, we use a version called <strong>Weighted Quick Union with Path Compression</strong> which makes both connection and query operations fast, even for large grids. This is crucial for checking whether the top and bottom are connected as the simulation progresses.
+  </p>
+
+  <h3>How to Use the Interactive Simulator</h3>
+  <p>
+    Below, you'll see a grid where each square represents a site. When you click on a blocked site, it becomes open. As you continue clicking, some open sites will turn <strong>light blue</strong> — these are "full" sites, meaning they're connected to the top. If any full site reaches the bottom row, the system <strong>percolates</strong>. You can adjust the grid size and explore how percolation behaves at different scales.
+  </p>
+      
+        
+      </div>
+
+<div id="controls">
+  <label>Grid Size: <input id="gridSize" type="number" value="10" min="1" max="50"/></label>
+  <button onclick="initPercolation()">Start</button>
+  <p id="status">Click on cells to open them</p>
+</div>
+
+<canvas id="canvas" width="600" height="600"></canvas>
+
+<hr>
+<div id="statsSection">
+    <h3>Percolation Threshold Simulator</h3>
+    <p>
+      Run <strong>Monte Carlo simulations</strong> to estimate the percolation threshold. This simulates multiple random openings on a grid and calculates:
+    </p>
+    <ul>
+      <li><strong>Mean</strong>: the average number of open sites when percolation occurred</li>
+      <li><strong>Standard deviation</strong>: how much this number varies across all trials</li>
+      <li><strong>Confidence interval</strong>: likely range where the true threshold lies</li>
+      <li><strong>Elapsed time</strong>: how long the simulation took</li>
+    </ul>
+  
+    <label>Grid Size (n): <input type="number" id="statsGridSize" value="20" min="1" max="100" /></label>
+    <label>Trials: <input type="number" id="statsTrials" value="30" min="1" max="10000" /></label>
+    <br>
+    <button onclick="runStats()">Run Simulation</button>
+    <pre id="statsOutput"></pre>
+  </div>
+
+
+<script>
+class WeightedQuickUnionUF {
+  constructor(n) {
+    this.parent = Array.from({length: n}, (_, i) => i);
+    this.rank = Array(n).fill(0);
+  }
+
+  find(p) {
+    if (this.parent[p] !== p) {
+      this.parent[p] = this.find(this.parent[p]); // Path compression
+    }
+    return this.parent[p];
+  }
+
+  union(p, q) {
+    let rootP = this.find(p);
+    let rootQ = this.find(q);
+    if (rootP === rootQ) return;
+
+    if (this.rank[rootP] < this.rank[rootQ]) {
+      this.parent[rootP] = rootQ;
+    } else if (this.rank[rootP] > this.rank[rootQ]) {
+      this.parent[rootQ] = rootP;
+    } else {
+      this.parent[rootQ] = rootP;
+      this.rank[rootP]++;
+    }
+  }
+
+  connected(p, q) {
+    return this.find(p) === this.find(q);
+  }
+}
+
+class Percolation {
+  constructor(n) {
+    this.n = n;
+    this.grid = Array.from({ length: n }, () => Array(n).fill(false));
+    this.uf = new WeightedQuickUnionUF(n * n + 2); // +2 for virtual top and bottom
+    this.top = n * n;
+    this.bottom = n * n + 1;
+    this.openCount = 0;
+
+    // for (let i = 0; i < n; i++) {
+    //   this.uf.union(this.top, this.xyTo1D(0, i));
+    //   this.uf.union(this.bottom, this.xyTo1D(n - 1, i));
+    // }
+  }
+
+  xyTo1D(row, col) {
+    return row * this.n + col;
+  }
+
+  open(row, col) {
+    if (this.grid[row][col]) return;
+    this.grid[row][col] = true;
+    this.openCount++;
+
+    const index = this.xyTo1D(row, col);
+
+    // Connect to virtual top/bottom only if this is a top/bottom site
+    if (row === 0) {
+        this.uf.union(this.top, index);
+    }
+    if (row === this.n - 1) {
+        this.uf.union(this.bottom, index);
+    }
+
+    const dirs = [[-1,0],[1,0],[0,-1],[0,1]];
+    for (let [dr, dc] of dirs) {
+      let r = row + dr, c = col + dc;
+      if (r >= 0 && r < this.n && c >= 0 && c < this.n && this.grid[r][c]) {
+        this.uf.union(this.xyTo1D(row, col), this.xyTo1D(r, c));
+      }
+    }
+  }
+
+  isOpen(row, col) {
+    return this.grid[row][col];
+  }
+
+  isFull(row, col) {
+    return this.uf.connected(this.top, this.xyTo1D(row, col));
+  }
+
+  percolates() {
+    return this.uf.connected(this.top, this.bottom);
+  }
+
+  numberOfOpenSites() {
+    return this.openCount;
+  }
+}
+
+// === UI Logic ===
+let percolation, canvas, ctx, gridSize;
+const cellMargin = 2;
+
+function initPercolation() {
+  gridSize = parseInt(document.getElementById('gridSize').value);
+  percolation = new Percolation(gridSize);
+  canvas = document.getElementById("canvas");
+  ctx = canvas.getContext("2d");
+  drawGrid();
+
+  canvas.addEventListener("click", handleClick);
+  updateStatus();
+}
+
+function handleClick(e) {
+  const rect = canvas.getBoundingClientRect();
+  const cellSize = canvas.width / gridSize;
+  const x = e.clientX - rect.left;
+  const y = e.clientY - rect.top;
+  const col = Math.floor(x / cellSize);
+  const row = Math.floor(y / cellSize);
+
+  if (row >= 0 && row < gridSize && col >= 0 && col < gridSize) {
+    if (!percolation.isOpen(row, col)) {
+      percolation.open(row, col);
+      drawGrid();
+      updateStatus();
+    }
+  }
+}
+
+function drawGrid() {
+  const cellSize = canvas.width / gridSize;
+  ctx.clearRect(0, 0, canvas.width, canvas.height);
+
+  for (let row = 0; row < gridSize; row++) {
+    for (let col = 0; col < gridSize; col++) {
+      if (percolation.isFull(row, col)) {
+        ctx.fillStyle = 'lightblue';
+      } else if (percolation.isOpen(row, col)) {
+        ctx.fillStyle = 'white';
+      } else {
+        ctx.fillStyle = 'black';
+      }
+      ctx.fillRect(
+        col * cellSize + cellMargin,
+        row * cellSize + cellMargin,
+        cellSize - 2 * cellMargin,
+        cellSize - 2 * cellMargin
+      );
+    }
+  }
+}
+
+function updateStatus() {
+  const open = percolation.numberOfOpenSites();
+  const perc = percolation.percolates() ? "Percolates ✅" : "Does not percolate ❌";
+  document.getElementById("status").textContent = `${open} open sites | ${perc}`;
+}
+
+function runStats() {
+  const n = parseInt(document.getElementById("statsGridSize").value);
+  const trials = parseInt(document.getElementById("statsTrials").value);
+  const thresholds = [];
+  const start = performance.now();
+
+  for (let t = 0; t < trials; t++) {
+    const perc = new Percolation(n);
+    const sites = Array.from({ length: n * n }, (_, i) => i);
+    shuffle(sites);
+
+    let opened = 0;
+    for (const idx of sites) {
+      const row = Math.floor(idx / n);
+      const col = idx % n;
+      if (!perc.isOpen(row, col)) {
+        perc.open(row, col);
+        opened++;
+        if (perc.percolates()) break;
+      }
+    }
+    thresholds.push(opened / (n * n));
+  }
+
+  const mean = average(thresholds);
+  const std = stddev(thresholds, mean);
+  const confLow = mean - (1.96 * std / Math.sqrt(trials));
+  const confHigh = mean + (1.96 * std / Math.sqrt(trials));
+  const elapsed = ((performance.now() - start) / 1000).toFixed(3);
+
+  const output = `
+mean = ${mean.toFixed(5)}
+stddev = ${std.toFixed(5)}
+95% confidence interval = [${confLow.toFixed(5)}, ${confHigh.toFixed(5)}]
+elapsed time = ${elapsed} seconds`;
+
+  document.getElementById("statsOutput").textContent = output;
+}
+
+// Helpers
+function average(arr) {
+  return arr.reduce((sum, x) => sum + x, 0) / arr.length;
+}
+
+function stddev(arr, mean) {
+  const variance = arr.reduce((sum, x) => sum + (x - mean) ** 2, 0) / (arr.length - 1);
+  return Math.sqrt(variance);
+}
+
+function shuffle(array) {
+  for (let i = array.length - 1; i > 0; i--) {
+    const j = Math.floor(Math.random() * (i + 1));
+    [array[i], array[j]] = [array[j], array[i]];
+  }
+}
+</script>
+
+</body>
+</html>
